@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,6 +72,60 @@ func TestCreateWorkspaceBlob(t *testing.T) {
 	outputTempDir := t.TempDir()
 	_, err = untar.Untar(blobReader, outputTempDir)
 	g.Expect(err).To(BeNil())
+
+	outputFilePath := filepath.Join(outputTempDir, ".terraform", "random.txt")
+	outputContent, err := os.ReadFile(outputFilePath)
+	g.Expect(err).To(BeNil())
+
+	g.Expect(outputContent).To(Equal(randomContent))
+}
+
+func TestCreateWorkspaceBlobStream(t *testing.T) {
+	g := NewGomegaWithT(t)
+
+	tempDir := t.TempDir()
+
+	terraformDir := filepath.Join(tempDir, ".terraform")
+	err := os.Mkdir(terraformDir, 0755)
+	g.Expect(err).To(BeNil())
+
+	filePath := filepath.Join(terraformDir, "random.txt")
+	randomContent := []byte("random content")
+	err = os.WriteFile(filePath, randomContent, 0644)
+	g.Expect(err).To(BeNil())
+
+	streamClient, err := runnerClient.CreateWorkspaceBlobStream(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir})
+	g.Expect(err).To(BeNil())
+
+	blob := bytes.NewBuffer([]byte{})
+	checksum := []byte{}
+
+	for {
+		chunk, err := streamClient.Recv()
+		if err != nil && err == io.EOF {
+			err = streamClient.CloseSend()
+			g.Expect(err).To(BeNil())
+			break
+		}
+		g.Expect(err).To(BeNil())
+
+		blob.Write(chunk.Blob)
+		if len(checksum) == 0 {
+			checksum = chunk.GetSha256Checksum()
+		}
+	}
+
+	sha := sha256.New()
+	_, err = sha.Write(blob.Bytes())
+	g.Expect(err).To(BeNil())
+	sum := sha.Sum(nil)
+	g.Expect(checksum).To(Equal(sum))
+
+	// blobReader := bytes.NewReader(resp.Blob)
+	blobReader := blob
+
+	outputTempDir := t.TempDir()
+	untar.Untar(blobReader, outputTempDir)
 
 	outputFilePath := filepath.Join(outputTempDir, ".terraform", "random.txt")
 	outputContent, err := os.ReadFile(outputFilePath)

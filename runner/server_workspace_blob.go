@@ -86,3 +86,39 @@ func (r *TerraformRunnerServer) CreateWorkspaceBlob(ctx context.Context, req *Cr
 		Sha256Checksum: sum,
 	}, nil
 }
+
+// CreateWorkspaceBlobStream archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
+func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBlobRequest, streamServer Runner_CreateWorkspaceBlobStreamServer) error {
+	log := ctrl.Log
+	// We dont' have context here... that's not good.
+	// log := ctrl.LoggerFrom(ctx).WithName(loggerName)
+	if req.TfInstance != r.InstanceID {
+		err := fmt.Errorf("no TF instance found")
+		log.Error(err, "no terraform")
+		return err
+	}
+
+	archivePath, err := storage.ArchiveDir(filepath.Join(req.WorkingDir, ".terraform"))
+	if err != nil {
+		log.Error(err, "unable to archive .terraform directory")
+		return err
+	}
+
+	// read archivePath into byte array
+	blob, err := os.ReadFile(archivePath)
+	if err != nil {
+		log.Error(err, "unable to read archive file")
+		return err
+	}
+
+	sha := sha256.New()
+	if _, err := sha.Write(blob); err != nil {
+		return err
+	}
+	sum := sha.Sum(nil)
+
+	return streamServer.Send(&CreateWorkspaceBlobReply{
+		Blob:           blob,
+		Sha256Checksum: sum,
+	})
+}

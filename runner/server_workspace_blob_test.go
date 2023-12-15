@@ -119,6 +119,7 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 	streamClient, err := runnerClient.CreateWorkspaceBlobStream(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir, Namespace: "flux-system"})
 	g.Expect(err).To(BeNil())
 
+	sha := sha256.New()
 	blob := bytes.NewBuffer([]byte{})
 	checksum := []byte{}
 
@@ -131,15 +132,20 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 		}
 		g.Expect(err).To(BeNil())
 
-		blob.Write(chunk.Blob)
-		if len(checksum) == 0 {
+		g.Expect(len(chunk.GetBlob())).To(BeNumerically("<=", runner.MessageChunkSize))
+
+		if len(chunk.Blob) > 0 {
+			_, err = sha.Write(chunk.Blob)
+			g.Expect(err).To(BeNil())
+
+			blob.Write(chunk.Blob)
+		}
+
+		if len(chunk.Sha256Checksum) > 0 {
 			checksum = chunk.GetSha256Checksum()
 		}
 	}
 
-	sha := sha256.New()
-	_, err = sha.Write(blob.Bytes())
-	g.Expect(err).To(BeNil())
 	sum := sha.Sum(nil)
 	g.Expect(checksum).To(Equal(sum))
 

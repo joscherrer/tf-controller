@@ -16,7 +16,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-const EncryptionKeyLength = 32
+const (
+	EncryptionKeyLength = 32
+	MessageChunkSize    = 1024 * 1024 * 10
+)
 
 // CreateWorkspaceBlob archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
 func (r *TerraformRunnerServer) CreateWorkspaceBlob(ctx context.Context, req *CreateWorkspaceBlobRequest) (*CreateWorkspaceBlobReply, error) {
@@ -56,8 +59,19 @@ func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBl
 		return err
 	}
 
+	for idx := 0; idx < len(blob); idx += MessageChunkSize {
+		eob := idx + MessageChunkSize
+		if eob > len(blob) {
+			eob = len(blob)
+		}
+
+		if err := streamServer.Send(&CreateWorkspaceBlobReply{Blob: blob[idx:eob]}); err != nil {
+			return err
+		}
+	}
+
 	return streamServer.Send(&CreateWorkspaceBlobReply{
-		Blob:           blob,
+		Blob:           []byte{},
 		Sha256Checksum: sum,
 	})
 }

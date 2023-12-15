@@ -39,6 +39,7 @@ func TestCreateWorkspaceBlob(t *testing.T) {
 	}
 	err := k8sClient.Create(ctx, encKeySecret)
 	g.Expect(err).To(BeNil())
+	defer waitResourceToBeDelete(g, encKeySecret)
 
 	terraformDir := filepath.Join(tempDir, ".terraform")
 	err = os.Mkdir(terraformDir, 0755)
@@ -52,7 +53,11 @@ func TestCreateWorkspaceBlob(t *testing.T) {
 	resp, err := runnerClient.CreateWorkspaceBlob(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir, Namespace: "flux-system"})
 	g.Expect(err).To(BeNil())
 
-	g.Expect(resp.GetSha256Checksum()).ToNot(BeEmpty())
+	sha := sha256.New()
+	_, err = sha.Write(resp.GetBlob())
+	g.Expect(err).To(BeNil())
+	sum := sha.Sum(nil)
+	g.Expect(resp.GetSha256Checksum()).To(Equal(sum))
 
 	token := encKeySecret.Data["token"]
 	key := token[:runner.EncryptionKeyLength]
@@ -85,8 +90,25 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 
 	tempDir := t.TempDir()
 
+	encKeySecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tf-runner.cache-encryption",
+			Namespace: "flux-system",
+			Annotations: map[string]string{
+				"kubernetes.io/service-account.name": "tf-runner",
+			},
+		},
+		Data: map[string][]byte{
+			"token": []byte(encryptionToken),
+		},
+		Type: v1.SecretTypeServiceAccountToken,
+	}
+	err := k8sClient.Create(ctx, encKeySecret)
+	g.Expect(err).To(BeNil())
+	defer waitResourceToBeDelete(g, encKeySecret)
+
 	terraformDir := filepath.Join(tempDir, ".terraform")
-	err := os.Mkdir(terraformDir, 0755)
+	err = os.Mkdir(terraformDir, 0755)
 	g.Expect(err).To(BeNil())
 
 	filePath := filepath.Join(terraformDir, "random.txt")
@@ -94,7 +116,7 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 	err = os.WriteFile(filePath, randomContent, 0644)
 	g.Expect(err).To(BeNil())
 
-	streamClient, err := runnerClient.CreateWorkspaceBlobStream(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir})
+	streamClient, err := runnerClient.CreateWorkspaceBlobStream(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir, Namespace: "flux-system"})
 	g.Expect(err).To(BeNil())
 
 	blob := bytes.NewBuffer([]byte{})
@@ -121,11 +143,25 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 	sum := sha.Sum(nil)
 	g.Expect(checksum).To(Equal(sum))
 
-	// blobReader := bytes.NewReader(resp.Blob)
-	blobReader := blob
+	token := encKeySecret.Data["token"]
+	key := token[:runner.EncryptionKeyLength]
+
+	// Decrypting content.
+	blobBytes := blob.Bytes()
+	aesCipher, err := aes.NewCipher(key)
+	g.Expect(err).To(BeNil())
+	gcm, err := cipher.NewGCM(aesCipher)
+	g.Expect(err).To(BeNil())
+	nonceSize := gcm.NonceSize()
+	nonce, ciphertext := blobBytes[:nonceSize], blobBytes[nonceSize:]
+	decrypted, err := gcm.Open(nil, nonce, ciphertext, nil)
+	g.Expect(err).To(BeNil())
+
+	blobReader := bytes.NewReader(decrypted)
 
 	outputTempDir := t.TempDir()
-	untar.Untar(blobReader, outputTempDir)
+	_, err = untar.Untar(blobReader, outputTempDir)
+	g.Expect(err).To(BeNil())
 
 	outputFilePath := filepath.Join(outputTempDir, ".terraform", "random.txt")
 	outputContent, err := os.ReadFile(outputFilePath)

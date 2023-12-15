@@ -70,8 +70,6 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 		}
 		g.Expect(err).To(BeNil())
 
-		g.Expect(len(chunk.GetBlob())).To(BeNumerically("<=", runner.MessageChunkSize))
-
 		if len(iv) == 0 {
 			iv = chunk.Blob
 			continue

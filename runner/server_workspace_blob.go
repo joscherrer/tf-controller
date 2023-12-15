@@ -17,10 +17,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-const (
-	EncryptionKeyLength = 32
-	MessageChunkSize    = 1024 * 1024 * 10
-)
+const EncryptionKeyLength = 32
 
 // CreateWorkspaceBlobStream archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
 func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBlobRequest, streamServer Runner_CreateWorkspaceBlobStreamServer) error {
@@ -85,8 +82,9 @@ func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace
 
 	// AES
 	aesCipher, _ := aes.NewCipher(key)
+	sha := sha256.New()
 
-	// Generate IV
+	// Generate and send IV.
 	iv := make([]byte, aes.BlockSize)
 	_, err = rand.Read(iv)
 	if err != nil {
@@ -95,8 +93,7 @@ func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace
 
 	chunkFn(iv)
 
-	sha := sha256.New()
-
+	// Read, encrypt, and send.
 	for {
 		block := make([]byte, aes.BlockSize)
 		n, err := file.Read(block)

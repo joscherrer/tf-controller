@@ -41,7 +41,6 @@ service Runner {
   rpc StartBreakTheGlassSession(BreakTheGlassRequest) returns (BreakTheGlassReply) {}
   rpc HasBreakTheGlassSessionDone(BreakTheGlassRequest) returns (BreakTheGlassReply) {}
 
-  rpc CreateWorkspaceBlob(CreateWorkspaceBlobRequest) returns (CreateWorkspaceBlobReply) {}
   rpc CreateWorkspaceBlobStream(CreateWorkspaceBlobRequest) returns (stream CreateWorkspaceBlobReply) {}
 }
 

@@ -50,7 +50,6 @@ type RunnerClient interface {
 	ForceUnlock(ctx context.Context, in *ForceUnlockRequest, opts ...grpc.CallOption) (*ForceUnlockReply, error)
 	StartBreakTheGlassSession(ctx context.Context, in *BreakTheGlassRequest, opts ...grpc.CallOption) (*BreakTheGlassReply, error)
 	HasBreakTheGlassSessionDone(ctx context.Context, in *BreakTheGlassRequest, opts ...grpc.CallOption) (*BreakTheGlassReply, error)
-	CreateWorkspaceBlob(ctx context.Context, in *CreateWorkspaceBlobRequest, opts ...grpc.CallOption) (*CreateWorkspaceBlobReply, error)
 	CreateWorkspaceBlobStream(ctx context.Context, in *CreateWorkspaceBlobRequest, opts ...grpc.CallOption) (Runner_CreateWorkspaceBlobStreamClient, error)
 }
 
@@ -314,15 +313,6 @@ func (c *runnerClient) HasBreakTheGlassSessionDone(ctx context.Context, in *Brea
 	return out, nil
 }
 
-func (c *runnerClient) CreateWorkspaceBlob(ctx context.Context, in *CreateWorkspaceBlobRequest, opts ...grpc.CallOption) (*CreateWorkspaceBlobReply, error) {
-	out := new(CreateWorkspaceBlobReply)
-	err := c.cc.Invoke(ctx, "/runner.Runner/CreateWorkspaceBlob", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *runnerClient) CreateWorkspaceBlobStream(ctx context.Context, in *CreateWorkspaceBlobRequest, opts ...grpc.CallOption) (Runner_CreateWorkspaceBlobStreamClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Runner_ServiceDesc.Streams[0], "/runner.Runner/CreateWorkspaceBlobStream", opts...)
 	if err != nil {
@@ -387,7 +377,6 @@ type RunnerServer interface {
 	ForceUnlock(context.Context, *ForceUnlockRequest) (*ForceUnlockReply, error)
 	StartBreakTheGlassSession(context.Context, *BreakTheGlassRequest) (*BreakTheGlassReply, error)
 	HasBreakTheGlassSessionDone(context.Context, *BreakTheGlassRequest) (*BreakTheGlassReply, error)
-	CreateWorkspaceBlob(context.Context, *CreateWorkspaceBlobRequest) (*CreateWorkspaceBlobReply, error)
 	CreateWorkspaceBlobStream(*CreateWorkspaceBlobRequest, Runner_CreateWorkspaceBlobStreamServer) error
 	mustEmbedUnimplementedRunnerServer()
 }
@@ -479,9 +468,6 @@ func (UnimplementedRunnerServer) StartBreakTheGlassSession(context.Context, *Bre
 }
 func (UnimplementedRunnerServer) HasBreakTheGlassSessionDone(context.Context, *BreakTheGlassRequest) (*BreakTheGlassReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HasBreakTheGlassSessionDone not implemented")
-}
-func (UnimplementedRunnerServer) CreateWorkspaceBlob(context.Context, *CreateWorkspaceBlobRequest) (*CreateWorkspaceBlobReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateWorkspaceBlob not implemented")
 }
 func (UnimplementedRunnerServer) CreateWorkspaceBlobStream(*CreateWorkspaceBlobRequest, Runner_CreateWorkspaceBlobStreamServer) error {
 	return status.Errorf(codes.Unimplemented, "method CreateWorkspaceBlobStream not implemented")
@@ -1003,24 +989,6 @@ func _Runner_HasBreakTheGlassSessionDone_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Runner_CreateWorkspaceBlob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateWorkspaceBlobRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RunnerServer).CreateWorkspaceBlob(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/runner.Runner/CreateWorkspaceBlob",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RunnerServer).CreateWorkspaceBlob(ctx, req.(*CreateWorkspaceBlobRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Runner_CreateWorkspaceBlobStream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(CreateWorkspaceBlobRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -1160,10 +1128,6 @@ var Runner_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HasBreakTheGlassSessionDone",
 			Handler:    _Runner_HasBreakTheGlassSessionDone_Handler,
-		},
-		{
-			MethodName: "CreateWorkspaceBlob",
-			Handler:    _Runner_CreateWorkspaceBlob_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

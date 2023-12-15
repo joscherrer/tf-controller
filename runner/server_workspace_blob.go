@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -21,27 +22,6 @@ const (
 	MessageChunkSize    = 1024 * 1024 * 10
 )
 
-// CreateWorkspaceBlob archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
-func (r *TerraformRunnerServer) CreateWorkspaceBlob(ctx context.Context, req *CreateWorkspaceBlobRequest) (*CreateWorkspaceBlobReply, error) {
-	log := ctrl.LoggerFrom(ctx).WithName(loggerName)
-	if req.TfInstance != r.InstanceID {
-		err := fmt.Errorf("no TF instance found")
-		log.Error(err, "no terraform")
-		return nil, err
-	}
-
-	blob, sum, err := r.archiveAndEncrypt(ctx, req.Namespace, filepath.Join(req.WorkingDir, ".terraform"))
-	if err != nil {
-		log.Error(err, "unable to archive and encrypt wokspace cache")
-		return nil, err
-	}
-
-	return &CreateWorkspaceBlobReply{
-		Blob:           blob,
-		Sha256Checksum: sum,
-	}, nil
-}
-
 // CreateWorkspaceBlobStream archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
 func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBlobRequest, streamServer Runner_CreateWorkspaceBlobStreamServer) error {
 	log := ctrl.Log
@@ -53,21 +33,17 @@ func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBl
 		return err
 	}
 
-	blob, sum, err := r.archiveAndEncrypt(context.Background(), req.Namespace, filepath.Join(req.WorkingDir, ".terraform"))
+	sum, err := r.archiveAndEncrypt(
+		context.Background(),
+		req.Namespace,
+		filepath.Join(req.WorkingDir, ".terraform"),
+		func(chunk []byte) error {
+			return streamServer.Send(&CreateWorkspaceBlobReply{Blob: chunk})
+		},
+	)
 	if err != nil {
 		log.Error(err, "unable to archive and encrypt wokspace cache")
 		return err
-	}
-
-	for idx := 0; idx < len(blob); idx += MessageChunkSize {
-		eob := idx + MessageChunkSize
-		if eob > len(blob) {
-			eob = len(blob)
-		}
-
-		if err := streamServer.Send(&CreateWorkspaceBlobReply{Blob: blob[idx:eob]}); err != nil {
-			return err
-		}
 	}
 
 	return streamServer.Send(&CreateWorkspaceBlobReply{
@@ -76,20 +52,14 @@ func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBl
 	})
 }
 
-func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace, path string) ([]byte, []byte, error) {
+func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace, path string, chunkFn func([]byte) error) ([]byte, error) {
 	log := ctrl.LoggerFrom(ctx).WithName(loggerName)
 
 	log.Info("archiving workspace directory", "dir", path)
 	archivePath, err := storage.ArchiveDir(path)
 	if err != nil {
 		log.Error(err, "unable to archive .terraform directory")
-		return nil, nil, fmt.Errorf("unable to archive .terraform directory: %w", err)
-	}
-
-	// Read archivePath into byte array.
-	blob, err := os.ReadFile(archivePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to read archive file: %w", err)
+		return nil, fmt.Errorf("unable to archive .terraform directory: %w", err)
 	}
 
 	// Read encryption secret.
@@ -99,7 +69,7 @@ func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace
 
 	log.Info("fetching secret key", "key", encryptionSecretKey)
 	if err := r.Client.Get(ctx, encryptionSecretKey, &encryptionSecret); err != nil {
-		return nil, nil, fmt.Errorf("unable to get encryption secret: %w", err)
+		return nil, fmt.Errorf("unable to get encryption secret: %w", err)
 	}
 
 	// 256 bit AES encryption with Galois Counter Mode.
@@ -107,31 +77,48 @@ func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace
 	token := encryptionSecret.Data["token"]
 	key := token[:EncryptionKeyLength]
 
-	aesCipher, err := aes.NewCipher(key)
+	// Read archivePath into byte array.
+	file, err := os.Open(archivePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create new AES cipher: %w", err)
+		return nil, fmt.Errorf("unable to read archive file: %w", err)
 	}
 
-	gcm, err := cipher.NewGCM(aesCipher)
+	// AES
+	aesCipher, _ := aes.NewCipher(key)
+
+	// Generate IV
+	iv := make([]byte, aes.BlockSize)
+	_, err = rand.Read(iv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to cretae new Galois Counter Mode cipher: %w", err)
+		return nil, fmt.Errorf("failed to read random data as iv: %w", err)
 	}
 
-	nonce := make([]byte, gcm.NonceSize())
-	_, err = rand.Read(nonce)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read random data as nonce: %w", err)
-	}
+	chunkFn(iv)
 
-	out := gcm.Seal(nonce, nonce, blob, nil)
-
-	// SHA256 checksum so we can verify if the saved content is not corrupted.
-	log.Info("generating sha256 checksum")
 	sha := sha256.New()
-	if _, err := sha.Write(out); err != nil {
-		return nil, nil, fmt.Errorf("unable to write sha256 checksum: %w", err)
-	}
-	sum := sha.Sum(nil)
 
-	return out, sum, nil
+	for {
+		block := make([]byte, aes.BlockSize)
+		n, err := file.Read(block)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+
+		if n == 0 {
+			break
+		}
+
+		ciphertext := make([]byte, aes.BlockSize)
+
+		stream := cipher.NewCTR(aesCipher, iv)
+		stream.XORKeyStream(ciphertext, block)
+
+		if _, err := sha.Write(ciphertext); err != nil {
+			return nil, fmt.Errorf("unable to write sha256 checksum: %w", err)
+		}
+
+		chunkFn(ciphertext)
+	}
+
+	return sha.Sum(nil), nil
 }

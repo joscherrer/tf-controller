@@ -1,6 +1,7 @@
 runner:
   image:
-    repository: ghcr.io/weaveworks/tf-runner
+    repository: ghcr.io/yitsushi/tf-runner
+    tag: build-daa7a3c852613f9b-1702999007
   serviceAccount:
     allowedNamespaces:
       - flux-system

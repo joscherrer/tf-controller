@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/weaveworks/tf-controller/internal/storage"
 	v1 "k8s.io/api/core/v1"
@@ -19,7 +18,8 @@ import (
 
 const EncryptionKeyLength = 32
 
-// CreateWorkspaceBlobStream archives and compresses using tar and gzip the .terraform directory and returns the tarball as a byte array
+// CreateWorkspaceBlobStream archives and compresses using tar and gzip the
+// workspace directory and returns the tarball as a byte array.
 func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBlobRequest, streamServer Runner_CreateWorkspaceBlobStreamServer) error {
 	log := ctrl.Log
 	// We dont' have context here... that's not good.
@@ -33,7 +33,7 @@ func (r *TerraformRunnerServer) CreateWorkspaceBlobStream(req *CreateWorkspaceBl
 	sum, err := r.archiveAndEncrypt(
 		context.Background(),
 		req.Namespace,
-		filepath.Join(req.WorkingDir, ".terraform"),
+		req.WorkingDir,
 		func(chunk []byte) error {
 			return streamServer.Send(&CreateWorkspaceBlobReply{Blob: chunk})
 		},
@@ -55,8 +55,7 @@ func (r *TerraformRunnerServer) archiveAndEncrypt(ctx context.Context, namespace
 	log.Info("archiving workspace directory", "dir", path)
 	archivePath, err := storage.ArchiveDir(path)
 	if err != nil {
-		log.Error(err, "unable to archive .terraform directory")
-		return nil, fmt.Errorf("unable to archive .terraform directory: %w", err)
+		return nil, fmt.Errorf("unable to archive workspace directory: %w", err)
 	}
 
 	// Read encryption secret.

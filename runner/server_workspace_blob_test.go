@@ -45,10 +45,19 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 	err = os.Mkdir(terraformDir, 0755)
 	g.Expect(err).To(BeNil())
 
-	filePath := filepath.Join(terraformDir, "random.txt")
 	randomContent := []byte("random content")
-	err = os.WriteFile(filePath, randomContent, 0644)
-	g.Expect(err).To(BeNil())
+
+	g.Expect(os.WriteFile(
+		filepath.Join(terraformDir, "random.txt"),
+		randomContent,
+		0644,
+	)).To(Succeed())
+
+	g.Expect(os.WriteFile(
+		filepath.Join(tempDir, "main.tf"),
+		randomContent,
+		0644,
+	)).To(Succeed())
 
 	streamClient, err := runnerClient.CreateWorkspaceBlobStream(ctx, &runner.CreateWorkspaceBlobRequest{TfInstance: "test", WorkingDir: tempDir, Namespace: "flux-system"})
 	g.Expect(err).To(BeNil())
@@ -100,9 +109,19 @@ func TestCreateWorkspaceBlobStream(t *testing.T) {
 	_, err = untar.Untar(blobReader, outputTempDir)
 	g.Expect(err).To(BeNil())
 
-	outputFilePath := filepath.Join(outputTempDir, ".terraform", "random.txt")
-	outputContent, err := os.ReadFile(outputFilePath)
-	g.Expect(err).To(BeNil())
+	func() {
+		outputFilePath := filepath.Join(outputTempDir, ".terraform", "random.txt")
+		outputContent, err := os.ReadFile(outputFilePath)
+		g.Expect(err).To(BeNil())
 
-	g.Expect(outputContent).To(Equal(randomContent))
+		g.Expect(outputContent).To(Equal(randomContent))
+	}()
+
+	func() {
+		outputFilePath := filepath.Join(outputTempDir, "main.tf")
+		outputContent, err := os.ReadFile(outputFilePath)
+		g.Expect(err).To(BeNil())
+
+		g.Expect(outputContent).To(Equal(randomContent))
+	}()
 }
